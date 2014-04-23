@@ -258,7 +258,9 @@ Module Application
             da.Fill(InfoTable)
         End Using
         For Each row In InfoTable.Rows
-            PoolIDs.Add(row.Item("ObjID"), row.Item("PoolId"))
+            If Not IsNothing(row.Item("PoolId")) Then
+                PoolIDs.Add(row.Item("ObjID"), row.Item("PoolId"))
+            End If
         Next
         InfoTable.Clear()
         'SZ TODO: Make this section a little more functionally borken up to make it easier to repeat for MIDs
