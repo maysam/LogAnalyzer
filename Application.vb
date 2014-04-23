@@ -8,12 +8,20 @@ Imports System.Configuration
 
 Module Application
 
+    Dim SQLConnection As SqlConnection
 
     Sub Main()
-        '#############SET UP VARIBLES################################################
-        'this is the connection string to your dabase
         Dim connectionString As String = ConfigurationManager.ConnectionStrings("gemConnectionString").ConnectionString
+        SQLConnection = New SqlConnection(connectionString)
+        SQLConnection.Open()
 
+        ParseLog()
+
+        process("Construct")
+        process("Measure")
+        SQLConnection.Close()
+    End Sub
+    Sub ParseLog()
         'this is the folder where are the logs are currently stored
         Dim myDocPath As String = ConfigurationManager.AppSettings("log_location")
 
@@ -23,7 +31,6 @@ Module Application
         'this is the table in the database where the Logs that we will use for group creation will be stored
         Dim LogStorageTable As String = "rImportedLogs"
         '#############################################################################
-        Dim conn As SqlConnection = Nothing
         Dim path As String = Directory.GetCurrentDirectory()
         Dim Botpattern As String = "(bot)|(spider)|(slurp)|(fdm)|(curl)|(synapse)|(crawl)"
         Dim CIdPattern As String = "(cid=)(\d*)"
@@ -38,8 +45,6 @@ Module Application
         Dim currentRow As String()
         Dim logData As StreamReader
 
-        Dim SQLConnection As New SqlConnection(connectionString)
-        SQLConnection.Open()
 
         'Step one'
         'We check all the log files out of a specified directory. if there are multiple files we will go through them in croniological order
@@ -143,28 +148,20 @@ Module Application
                 End Try
             End While
         Next
-
-        Dim CIDStorageTable As String = "rConstructSim"
-        Dim MIDStorageTable As String = "rMeasureSim"
-        process("c", CIDStorageTable)
-        process("m", MIDStorageTable)
-        SQLConnection.Close()
     End Sub
-
     Function Entropy(ByVal N, ByVal k) As Double
         If N <> 0 Then
             Dim value As Integer = (k = 0)
             Dim retValue As Double = ((k / N) * Math.Log((k - value) / N))
             Return retValue
         Else
-            Return -1
+            Return 0
         End If
     End Function
 
-    Sub process(ByVal Mode As Char, ByVal StorageTable As String)
+    Sub process(ByVal Model As String)
         '#########################SET UP VARIBLES###############################
         'like in the log digester step your this database connection string will be differnt for you
-        Dim connectionString As String = ConfigurationManager.ConnectionStrings("gemConnectionString").ConnectionString
 
         Dim months_to_look_back As Integer = ConfigurationManager.AppSettings("months_to_look_back")
 
@@ -176,14 +173,12 @@ Module Application
 
         'this is the table where you will store your results for the CIDs and under the current design the MIDs
         '#######################################################################
-        Dim conn As SqlConnection = Nothing
         Dim row As DataRow
         Dim IpToGroup As New Dictionary(Of String, Integer)
         Dim GroupToTime As New Dictionary(Of String, DateTime)
         Dim GroupToVisited As New Dictionary(Of Integer, LinkedList(Of Integer))
         Dim CIDGroupToVisitCount As New Dictionary(Of Integer, Integer)
         Dim CIDToCount As New Dictionary(Of Integer, Integer)
-        Dim Overlap_Count As Integer
         Dim CIDGroup_count As Integer = 0
         Dim InfoTable = New DataTable
         Dim sqlCommand As New SqlCommand
@@ -195,19 +190,12 @@ Module Application
         Dim LRR As Double
         Dim resultsCount As Integer = 0
         Dim Count1, Count2 As Integer
-        '        Dim CIDIgnoreList As New List(Of String)
-        'Dim IsCID As Boolean = True
-
         Dim FirstKeyOnly, SecondKeyOnly, NeitherKey, totalCount, rowTotal1, rowTotal2, ColumTotal1, ColumnTotal2 As Integer
-        Dim Input(9) As String
-
-        Dim SQLConnection As New SqlConnection(connectionString)
-        SQLConnection.Open()
 
         CIDGroup_count = 0
 
         '##########LOG TABLE CALL##############################
-        Using da = New SqlDataAdapter("SELECT dateTimeAccessed, IpAddress, itemID FROM " & LogStorageTable & " where itemTYPE = '" & Mode & "' and dateTimeAccessed > '" & DateAdd(DateInterval.Month, -months_to_look_back, DateTime.Now) & "'", SQLConnection)
+        Using da = New SqlDataAdapter("SELECT dateTimeAccessed, IpAddress, itemID FROM " & LogStorageTable & " where itemTYPE = '" & Model(0) & "' and dateTimeAccessed > '" & DateAdd(DateInterval.Month, -months_to_look_back, DateTime.Now) & "'", SQLConnection)
             da.Fill(InfoTable)
         End Using
 
@@ -231,7 +219,6 @@ Module Application
                 Else
                     'Map this visit to a new group if it is outside the time window
                     _IpToGroup = IpToGroup.Item(_IpAddress) = CIDGroup_count
-                    'IpToGroup.Item(_IpToGroup) = CIDGroup_count
                     GroupToVisited.Add(CIDGroup_count, New LinkedList(Of Integer))
                     GroupToVisited(CIDGroup_count).AddLast(_item)
                     CIDGroupToVisitCount.Add(CIDGroup_count, 1)
@@ -262,28 +249,32 @@ Module Application
             CIDGroup_count -= 1
         Next
         CIDGroup_count += CIDGroupToVisitCount.Count
+        Dim ResultsArray(CIDToCount.Count()) As Tuple(Of Double, Integer, Boolean)
+        Dim PoolIDs As New Dictionary(Of Integer, Integer)
         For Each key2 In CIDToCount.Keys.ToList
             CIDToCount.Item(key2) += GroupToVisited.Where(Function(obj) obj.Value.Contains(key2)).Count
         Next
-
-        Dim ResultsArray(CIDToCount.Count()) As Tuple(Of Double, Integer)
-
+        Using da = New SqlDataAdapter("SELECT " & Model & "Id as ObjID, PoolId FROM t" & Model & " left join rcategories cat on constructid = cat.variableid", SQLConnection)
+            da.Fill(InfoTable)
+        End Using
+        For Each row In InfoTable.Rows
+            PoolIDs.Add(row.Item("ObjID"), row.Item("PoolId"))
+        Next
+        InfoTable.Clear()
         'SZ TODO: Make this section a little more functionally borken up to make it easier to repeat for MIDs
-        For Each key In CIDToCount.Keys()
+        For Each key1 In CIDToCount.Keys()
             resultsCount = 0
+            Dim PoolID = -1
+            If PoolIDs.ContainsKey(key1) Then
+                PoolID = PoolIDs(key1)
+            End If
             For Each key2 In CIDToCount.Keys()
-                Overlap_Count = 0
                 'get values for algorythm
-                If key <> key2 Then
-                    For Each Key3 In GroupToVisited.Keys()
-                        'Regex match the other two keys versus the contents of this dictionary because I need this value for the algorythm
-                        If GroupToVisited.Item(Key3).Contains(key) And GroupToVisited.Item(Key3).Contains(key2) Then
-                            Overlap_Count += 1
-                        End If
-                    Next
+                If key1 <> key2 Then
+                    Dim Overlap_Count = GroupToVisited.Where(Function(obj) obj.Value.Contains(key1) And obj.Value.Contains(key2)).Count
                     'run algorythm
                     'Overlap +CI1 count +cid2 Count - 2*Overlap +group_count - Cid1 count - CID2 count + overlap = group count)
-                    FirstKeyOnly = CIDToCount.Item(key) - Overlap_Count
+                    FirstKeyOnly = CIDToCount.Item(key1) - Overlap_Count
                     SecondKeyOnly = CIDToCount.Item(key2) - Overlap_Count
                     NeitherKey = CIDGroup_count - Count1 - Count2 + Overlap_Count
                     totalCount = Overlap_Count + FirstKeyOnly + SecondKeyOnly + NeitherKey
@@ -299,7 +290,11 @@ Module Application
                     'I could rewrite this to make the multiplication by Group_count unnecessary, but lets get it working first
                     LRR = 2 * (totalEntropy - rowEntropy - columnEntropy)
                     If (Overlap_Count > 0) Then
-                        ResultsArray(resultsCount) = Tuple.Create(LRR, key2)
+                        Dim _PoolID = -1
+                        If PoolIDs.ContainsKey(key2) Then
+                            _PoolID = PoolIDs(key2)
+                        End If
+                        ResultsArray(resultsCount) = Tuple.Create(LRR, key2, PoolID = _PoolID)
                         resultsCount += 1
                     End If
                 End If
@@ -308,16 +303,36 @@ Module Application
             Array.Reverse(ResultsArray)
             ' we will be submitting the top ten values in the list generated above
             ' if there is we need to overwrite that row
-            sqlCommand = New SqlCommand("Delete From " & StorageTable & " Where FocalKey='" & key & "'", SQLConnection)
+            Dim StorageTable = "r" & Model & "Sim"
+            sqlCommand = New SqlCommand("Delete From " & StorageTable & " Where FocalKey='" & key1 & "'", SQLConnection)
             sqlCommand.ExecuteNonQuery()
-            For counter As Integer = 0 To 9
-                If Not IsNothing(ResultsArray(counter)) And ResultsArray(counter).Item1 <> -1 Then
-                    sqlCommand = New SqlCommand("insert into " & StorageTable & "(FocalKey, RelationshipType, RecommendationNo, RelatedId, Score) values(" & key & ", 's', " & counter + 1 & ", " & ResultsArray(counter).Item2 & ", " & ResultsArray(counter).Item1 & ")", SQLConnection)
+            Dim sCounter = 1
+            Dim rCounter = 1
+            For counter As Integer = 0 To 99
+                If IsNothing(ResultsArray(counter)) Then
+                ElseIf ResultsArray(counter).Item1 <> -1 Then
+                    Dim relationship
+                    Dim _counter
+                    If ResultsArray(counter).Item3 Then
+                        If sCounter > 10 Then
+                            Continue For
+                        End If
+                        _counter = sCounter
+                        sCounter += 1
+                        relationship = "s"
+                    Else
+                        If rCounter > 10 Then
+                            Continue For
+                        End If
+                        _counter = rCounter
+                        rCounter += 1
+                        relationship = "r"
+                    End If
+                    sqlCommand = New SqlCommand("insert into " & StorageTable & "(FocalKey, RelationshipType, RecommendationNo, RelatedId, Score) values(" & key1 & ", '" & relationship & "', " & _counter & ", " & ResultsArray(counter).Item2 & ", " & ResultsArray(counter).Item1 & ")", SQLConnection)
                     sqlCommand.ExecuteNonQuery()
                 End If
             Next
         Next
-        SQLConnection.Close()
     End Sub
 
 End Module
