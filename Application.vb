@@ -96,7 +96,7 @@ Module Application
                     If currentRow.Length > 11 Then
                         'the bot pattern contains a list of words that you find in queries that are just trawling the website and
                         '    have a negative impact on our results
-                        If Regex.IsMatch(currentRow(12), Botpattern) Then
+                        If Regex.IsMatch(currentRow(12), Botpattern, RegexOptions.IgnoreCase) Then
                             Continue While
                         End If
                         'checking for a cid
