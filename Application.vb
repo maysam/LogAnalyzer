@@ -149,14 +149,18 @@ Module Application
             End While
         Next
     End Sub
-    Function Entropy(ByVal N, ByVal k) As Double
-        If N <> 0 Then
-            Dim value As Integer = (k = 0)
-            Dim retValue As Double = ((k / N) * Math.Log((k - value) / N))
-            Return retValue
-        Else
-            Return 0
-        End If
+    Function Entropy(ByRef Numbers As Array) As Double
+        Dim Sum = 0
+        For i = 0 To Numbers.Length - 1
+            Sum = Numbers(i) + Sum
+        Next
+        Dim result = 0
+        For i = 0 To Numbers.Length - 1
+            Dim X As Integer = Numbers(i)
+            If X <= 0 Then Continue For
+            result = result + X * Math.Log(X / Sum)
+        Next
+        Return -result
     End Function
 
     Sub process(ByVal Model As String)
@@ -190,7 +194,6 @@ Module Application
         Dim LRR As Double
         Dim resultsCount As Integer = 0
         Dim Count1, Count2 As Integer
-        Dim FirstKeyOnly, SecondKeyOnly, NeitherKey, totalCount, rowTotal1, rowTotal2, ColumTotal1, ColumnTotal2 As Integer
 
         CIDGroup_count = 0
 
@@ -274,22 +277,13 @@ Module Application
                 'get values for algorythm
                 If key1 <> key2 Then
                     Dim Overlap_Count = GroupToVisited.Where(Function(obj) obj.Value.Contains(key1) And obj.Value.Contains(key2)).Count
-                    'run algorythm
-                    'Overlap +CI1 count +cid2 Count - 2*Overlap +group_count - Cid1 count - CID2 count + overlap = group count)
-                    FirstKeyOnly = CIDToCount.Item(key1) - Overlap_Count
-                    SecondKeyOnly = CIDToCount.Item(key2) - Overlap_Count
-                    NeitherKey = CIDGroup_count - Count1 - Count2 + Overlap_Count
-                    totalCount = Overlap_Count + FirstKeyOnly + SecondKeyOnly + NeitherKey
-                    rowTotal1 = Overlap_Count + SecondKeyOnly
-                    rowTotal2 = FirstKeyOnly + NeitherKey
-                    ColumnTotal2 = SecondKeyOnly + NeitherKey
-                    ColumTotal1 = Overlap_Count + FirstKeyOnly
-
-                    totalEntropy = Entropy(totalCount, Overlap_Count) + Entropy(totalCount, FirstKeyOnly) + Entropy(totalCount, SecondKeyOnly) + Entropy(totalCount, NeitherKey)
-                    columnEntropy = Entropy(rowTotal1, Overlap_Count) + Entropy(rowTotal1, SecondKeyOnly) + Entropy(rowTotal2, FirstKeyOnly) + Entropy(rowTotal2, NeitherKey)
-                    'here the overlap counts delete themselves for the second entry same with the CID2 counts
-                    rowEntropy = Entropy(ColumTotal1, Overlap_Count) + Entropy(ColumTotal1, FirstKeyOnly) + Entropy(ColumnTotal2, SecondKeyOnly) + Entropy(ColumnTotal2, NeitherKey)
-                    'I could rewrite this to make the multiplication by Group_count unnecessary, but lets get it working first
+                    Dim FirstKeyOnly = CIDToCount.Item(key1) - Overlap_Count
+                    Dim SecondKeyOnly = CIDToCount.Item(key2) - Overlap_Count
+                    Dim NeitherKey = CIDGroup_count - Count1 - Count2 + Overlap_Count
+                    
+                    rowEntropy = Entropy({Overlap_Count, SecondKeyOnly}) + Entropy({FirstKeyOnly, NeitherKey})
+                    columnEntropy = Entropy({Overlap_Count, FirstKeyOnly}) + Entropy({SecondKeyOnly, NeitherKey})
+                    totalEntropy = Entropy({FirstKeyOnly, SecondKeyOnly, Overlap_Count, NeitherKey})
                     LRR = 2 * (totalEntropy - rowEntropy - columnEntropy)
                     If (Overlap_Count > 0) Then
                         Dim _PoolID = -1
