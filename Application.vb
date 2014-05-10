@@ -157,10 +157,10 @@ Module Application
         Dim result = 0
         For i = 0 To Numbers.Length - 1
             Dim X As Integer = Numbers(i)
-            If X <= 0 Then Continue For
-            result = result + X * Math.Log(X / Sum)
+            If X <= 1 Then Continue For
+            result = result + X * Math.Log(X)
         Next
-        Return -result
+        Return Sum * Math.Log(Sum) - result
     End Function
 
     Sub process(ByVal Model As String)
@@ -261,7 +261,7 @@ Module Application
             da.Fill(InfoTable)
         End Using
         For Each row In InfoTable.Rows
-            If Not IsNothing(row.Item("PoolId")) Then
+            If Not IsNothing(row.Item("PoolId")) And Not IsDBNull(row.Item("PoolId")) Then
                 PoolIDs.Add(row.Item("ObjID"), row.Item("PoolId"))
             End If
         Next
@@ -277,22 +277,28 @@ Module Application
                 'get values for algorythm
                 If key1 <> key2 Then
                     Dim Overlap_Count = GroupToVisited.Where(Function(obj) obj.Value.Contains(key1) And obj.Value.Contains(key2)).Count
+                    If Overlap_Count = 0 Then
+                        Continue For
+                    End If
                     Dim FirstKeyOnly = CIDToCount.Item(key1) - Overlap_Count
                     Dim SecondKeyOnly = CIDToCount.Item(key2) - Overlap_Count
                     Dim NeitherKey = CIDGroup_count - Count1 - Count2 + Overlap_Count
-                    
+
                     rowEntropy = Entropy({Overlap_Count, SecondKeyOnly}) + Entropy({FirstKeyOnly, NeitherKey})
                     columnEntropy = Entropy({Overlap_Count, FirstKeyOnly}) + Entropy({SecondKeyOnly, NeitherKey})
                     totalEntropy = Entropy({FirstKeyOnly, SecondKeyOnly, Overlap_Count, NeitherKey})
-                    LRR = 2 * (totalEntropy - rowEntropy - columnEntropy)
-                    If (Overlap_Count > 0) Then
-                        Dim _PoolID = -1
-                        If PoolIDs.ContainsKey(key2) Then
-                            _PoolID = PoolIDs(key2)
-                        End If
-                        ResultsArray(resultsCount) = Tuple.Create(LRR, key2, PoolID = _PoolID)
-                        resultsCount += 1
+                    If rowEntropy + columnEntropy > totalEntropy Then
+                        LRR = 0
+                    Else
+                        LRR = 2 * (totalEntropy - rowEntropy - columnEntropy)
                     End If
+                    Dim _PoolID = -1
+                    If PoolIDs.ContainsKey(key2) Then
+                        _PoolID = PoolIDs(key2)
+                    End If
+                    Dim Scaled_LRR = LRR / (1 + LRR)
+                    ResultsArray(resultsCount) = Tuple.Create(Scaled_LRR, key2, PoolID = _PoolID)
+                    resultsCount += 1
                 End If
             Next
             Array.Sort(ResultsArray)
