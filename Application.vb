@@ -32,12 +32,13 @@ Module Application
         Dim LogStorageTable As String = "rImportedLogs"
         '#############################################################################
         Dim path As String = Directory.GetCurrentDirectory()
-        Dim Botpattern As String = "(bot)|(spider)|(slurp)|(fdm)|(curl)|(synapse)|(crawl)"
-        Dim CIdPattern As String = "(cid=)(\d*)"
-        Dim MIdPattern As String = "(mid=)(\d*)"
+        Dim pagePattern As Regex = New Regex("/Public/((Measure)|(Construct))Detail.aspx", RegexOptions.IgnoreCase)
+        Dim Botpattern As Regex = New Regex("(bot)|(spider)|(slurp)|(fdm)|(curl)|(synapse)|(crawl)", RegexOptions.IgnoreCase)
+        Dim CIdPattern As Regex = New Regex("(cid=)(\d*)", RegexOptions.IgnoreCase)
+        Dim MIdPattern As Regex = New Regex("(mid=)(\d*)", RegexOptions.IgnoreCase)
         Dim Access_date, time, visitorIP As String
         Dim itemID = vbNullString
-        Dim IDmatch As MatchCollection
+        Dim IDmatch As Match
         Dim Access_time As DateTime
         Dim CIDExists, MIDExists As Boolean
         Dim RecordsAffected As Integer
@@ -74,6 +75,7 @@ Module Application
                 Try
                     CIDExists = False
                     MIDExists = False
+                    Dim PageID As String = ""
                     CurrentLine = logData.ReadLine()
                     If current_last_line <> "" Then
                         If CurrentLine = current_last_line Then
@@ -85,55 +87,41 @@ Module Application
                     Dim currentRow = CurrentLine.Split(New Char() {" "c})
                     'we need to ensure that each line has at least 12 partitions or it will not have the information we need
                     '  to determine if it should go into the database for the next step
-                    If currentRow.Length > 11 Then
+                    If currentRow.Length = 22 Then
                         'the bot pattern contains a list of words that you find in queries that are just trawling the website and
                         '    have a negative impact on our results
-                        If Regex.IsMatch(currentRow(12), Botpattern, RegexOptions.IgnoreCase) Then
+                        If Botpattern.IsMatch(currentRow(12)) Then
                             Continue While
                         End If
                         'checking for a cid
-                        If Regex.IsMatch(currentRow(7), CIdPattern) Then
-                            IDmatch = Regex.Matches(currentRow(7), CIdPattern)
-                            CIDExists = True
-                            If IDmatch.Item(0).ToString = "cid=" Or IDmatch.Item(0).ToString = "cid=0" Then
-                                CIDExists = False
-                            Else
-                                itemID = IDmatch.Item(0).ToString
+                        Dim PM As Match = pagePattern.Match(currentRow(6))
+                        If PM.Success Then
+                            Dim CorM As String
+                            If PM.Groups(1).Value.ToUpper() = "CONSTRUCT" Then
+                                CIDExists = True
+                                IDmatch = CIdPattern.Match(currentRow(7))
+                                CorM = "c"
                             End If
-                        End If
-                        'checking for a mid'
-                        If Regex.IsMatch(currentRow(7), MIdPattern) Then
-                            IDmatch = Regex.Matches(currentRow(7), MIdPattern)
-                            MIDExists = True
-                            If IDmatch.Item(0).ToString = "mid=" Or IDmatch.Item(0).ToString = "mid=0" Then
-                                MIDExists = False
-                            Else
-                                itemID = IDmatch.Item(0).ToString
+                            If PM.Groups(1).Value.ToUpper() = "MEASURE" Then
+                                MIDExists = True
+                                IDmatch = MIdPattern.Match(currentRow(7))
+                                CorM = "m"
                             End If
-                        End If
-                        If Not CIDExists And Not MIDExists Then
-                            Continue While
-                        End If
-                        Access_date = currentRow(0)
-                        time = currentRow(1)
-                        visitorIP = currentRow(10)
-                        Access_time = Convert.ToDateTime(Access_date + " " + time)
-                    Else
-                        Continue While
-                    End If
-                    'once we have pulled all th information we need from the logfile and we have tedermined it is one we want to youse we insert it into the database
-                    Dim parts As String() = itemID.Split((New Char() {"="}))
-                    Dim CorM As Char
-                    If CIDExists Then
-                        CorM = "c"
-                    ElseIf MIDExists Then
-                        CorM = "m"
-                    End If
-                    If CorM = "c" Or CorM = "m" Then
-                        sqlCommand = New SqlCommand("INSERT INTO " + LogStorageTable + "([dateTimeAccessed],[IpAddress],[itemTYPE],[itemID]) Values('" + Access_time + "','" + visitorIP + "', '" + CorM + "','" + parts(1) + "') ", SQLConnection)
-                        sqlCommand.ExecuteNonQuery()
-                    End If
+                            If IDmatch.Success Then
+                                PageID = IDmatch.Groups(2).Value
+                                Access_date = currentRow(0)
+                                time = currentRow(1)
+                                visitorIP = currentRow(10)
+                                Access_time = Convert.ToDateTime(Access_date + " " + time)
 
+                                'once we have pulled all th information we need from the logfile and we have tedermined it is one we want to youse we insert it into the database
+
+                                sqlCommand = New SqlCommand("INSERT INTO " + LogStorageTable + "([dateTimeAccessed],[IpAddress],[itemTYPE],[itemID]) Values('" + Access_time + "','" + visitorIP + "', '" + CorM + "','" + PageID + "') ", SQLConnection)
+                                sqlCommand.ExecuteNonQuery()
+
+                            End If
+                        End If
+                    End If
                 Catch ex As Microsoft.VisualBasic.FileIO.MalformedLineException
                     Console.WriteLine("Line " & ex.Message & "is not valid and will be skipped.")
                 End Try
