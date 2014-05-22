@@ -134,7 +134,7 @@ Module Application
 
             Else
                 sqlCommand = New SqlCommand("UPDATE " + FileTable + " Set last_line='" + CurrentLine + "' WHERE fileName='" + logfile + "'", SQLConnection)
-                    RecordsAffected = sqlCommand.ExecuteNonQuery()
+                RecordsAffected = sqlCommand.ExecuteNonQuery()
             End If
         Next
     End Sub
@@ -169,8 +169,8 @@ Module Application
         Dim row As DataRow
         Dim IpToGroup As New Dictionary(Of String, Integer)
         Dim GroupToTime As New Dictionary(Of String, DateTime)
-        Dim GroupToVisited As New Dictionary(Of Integer, LinkedList(Of Integer))
-        Dim CIDGroupToVisitCount As New Dictionary(Of Integer, Integer)
+        Dim GroupToVisited As New Dictionary(Of Integer, HashSet(Of Integer))
+        Dim GroupVisitCount As New Dictionary(Of Integer, Integer)
         Dim CIDToCount As New Dictionary(Of Integer, Integer)
         Dim CIDGroup_count As Integer = 0
         Dim InfoTable = New DataTable
@@ -180,9 +180,7 @@ Module Application
         Dim columnEntropy As Double
         Dim rowEntropy As Double
         Dim totalEntropy As Double
-        Dim LRR As Double
         Dim resultsCount As Integer = 0
-        Dim Count1, Count2 As Integer
 
         CIDGroup_count = 0
 
@@ -206,23 +204,23 @@ Module Application
                 'if exists check time to see if it is in the window to be a new group or appended to the current one
                 If within_timeframe Then
                     GroupToTime.Item(_IpToGroup) = row.Item("dateTimeAccessed")
-                    CIDGroupToVisitCount.Item(_IpToGroup) += 1
-                    GroupToVisited.Item(_IpToGroup).AddLast(_item)
+                    GroupVisitCount.Item(_IpToGroup) += 1
+                    GroupToVisited.Item(_IpToGroup).Add(_item)
                 Else
                     'Map this visit to a new group if it is outside the time window
                     _IpToGroup = IpToGroup.Item(_IpAddress) = CIDGroup_count
-                    GroupToVisited.Add(CIDGroup_count, New LinkedList(Of Integer))
-                    GroupToVisited(CIDGroup_count).AddLast(_item)
-                    CIDGroupToVisitCount.Add(CIDGroup_count, 1)
+                    GroupToVisited.Add(CIDGroup_count, New HashSet(Of Integer))
+                    GroupToVisited(CIDGroup_count).Add(_item)
+                    GroupVisitCount.Add(CIDGroup_count, 1)
                     GroupToTime.Add(CIDGroup_count, row.Item("dateTimeAccessed"))
                     CIDGroup_count += 1
                 End If
             Else
                 'make new group as necessary
                 IpToGroup.Add(_IpAddress, CIDGroup_count)
-                GroupToVisited.Add(CIDGroup_count, New LinkedList(Of Integer))
-                GroupToVisited(CIDGroup_count).AddLast(_item)
-                CIDGroupToVisitCount.Add(CIDGroup_count, 1)
+                GroupToVisited.Add(CIDGroup_count, New HashSet(Of Integer))
+                GroupToVisited(CIDGroup_count).Add(_item)
+                GroupVisitCount.Add(CIDGroup_count, 1)
                 GroupToTime.Add(CIDGroup_count, row.Item("dateTimeAccessed"))
                 CIDGroup_count += 1
             End If
@@ -234,13 +232,11 @@ Module Application
         GroupToTime.Clear()
         IpToGroup.Clear()
         InfoTable.Clear()
-        Dim removableKeys = (From pair In CIDGroupToVisitCount Where pair.Value < 5 Select pair.Key).ToArray
+        Dim removableKeys = (From pair In GroupVisitCount Where pair.Value < 5 Select pair.Key).ToArray
         For Each key In removableKeys
-            CIDGroupToVisitCount.Remove(key)
+            GroupVisitCount.Remove(key)
             GroupToVisited.Remove(key)
-            CIDGroup_count -= 1
         Next
-        CIDGroup_count += CIDGroupToVisitCount.Count
         Dim ResultsArray(CIDToCount.Count()) As Tuple(Of Double, Integer, Boolean)
         Dim PoolIDs As New Dictionary(Of Integer, Integer)
         For Each key2 In CIDToCount.Keys.ToList
@@ -255,7 +251,6 @@ Module Application
             End If
         Next
         InfoTable.Clear()
-        'SZ TODO: Make this section a little more functionally borken up to make it easier to repeat for MIDs
         For Each key1 In CIDToCount.Keys()
             resultsCount = 0
             Dim PoolID = -1
@@ -266,18 +261,15 @@ Module Application
                 'get values for algorythm
                 If key1 <> key2 Then
                     Dim Overlap_Count = GroupToVisited.Where(Function(obj) obj.Value.Contains(key1) And obj.Value.Contains(key2)).Count
-                    Dim FirstKeyOnly = CIDToCount.Item(key1) - Overlap_Count
-                    Dim SecondKeyOnly = CIDToCount.Item(key2) - Overlap_Count
-                    Dim NeitherKey = CIDGroup_count - Count1 - Count2 + Overlap_Count
+                    Dim FirstKeyOnly = GroupToVisited.Where(Function(obj) obj.Value.Contains(key1) And Not obj.Value.Contains(key2)).Count
+                    Dim SecondKeyOnly = GroupToVisited.Where(Function(obj) Not obj.Value.Contains(key1) And obj.Value.Contains(key2)).Count
+                    Dim NeitherKey = GroupToVisited.Where(Function(obj) Not obj.Value.Contains(key1) And Not obj.Value.Contains(key2)).Count
 
                     rowEntropy = Entropy({Overlap_Count + SecondKeyOnly, FirstKeyOnly + NeitherKey})
                     columnEntropy = Entropy({Overlap_Count + FirstKeyOnly, SecondKeyOnly + NeitherKey})
                     totalEntropy = Entropy({FirstKeyOnly, SecondKeyOnly, Overlap_Count, NeitherKey})
-                    If rowEntropy + columnEntropy < totalEntropy Then
-                        LRR = 0
-                    Else
-                        LRR = 2 * (rowEntropy + columnEntropy - totalEntropy)
-
+                    If rowEntropy + columnEntropy > totalEntropy Then
+                        Dim LRR As Double = 2 * (rowEntropy + columnEntropy - totalEntropy)
                         Dim _PoolID = -1
                         If PoolIDs.ContainsKey(key2) Then
                             _PoolID = PoolIDs(key2)
