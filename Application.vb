@@ -32,17 +32,16 @@ Module Application
         Dim LogStorageTable As String = "rImportedLogs"
         '#############################################################################
         Dim path As String = Directory.GetCurrentDirectory()
-        Dim Botpattern As String = "(bot)|(spider)|(slurp)|(fdm)|(curl)|(synapse)|(crawl)"
-        Dim CIdPattern As String = "(cid=)(\d*)"
-        Dim MIdPattern As String = "(mid=)(\d*)"
+        Dim pagePattern As Regex = New Regex("/Public/((Measure)|(Construct))Detail.aspx", RegexOptions.IgnoreCase)
+        Dim Botpattern As Regex = New Regex("(bot)|(spider)|(slurp)|(fdm)|(curl)|(synapse)|(crawl)", RegexOptions.IgnoreCase)
+        Dim CIdPattern As Regex = New Regex("(cid=)(\d*)", RegexOptions.IgnoreCase)
+        Dim MIdPattern As Regex = New Regex("(mid=)(\d*)", RegexOptions.IgnoreCase)
         Dim Access_date, time, visitorIP As String
         Dim itemID = vbNullString
-        Dim IDmatch As MatchCollection
+        Dim IDmatch As Match
         Dim Access_time As DateTime
         Dim CIDExists, MIDExists As Boolean
         Dim RecordsAffected As Integer
-        Dim CurrentLine As String
-        Dim currentRow As String()
         Dim logData As StreamReader
 
 
@@ -54,27 +53,15 @@ Module Application
         Dim dataTable = New DataTable
         Dim sqlCommand
         For Each logfile As String In Directory.EnumerateFiles(myDocPath, "*.log")
-            Dim last_edit = FileDateTime(logfile)
-            Dim current_last_edit As DateTime = DateTime.MinValue
-            Using dataAdapter = New SqlDataAdapter("SELECT last_edit FROM " + FileTable + " WHERE fileName='" + logfile + "'", SQLConnection)
+            Dim current_last_line = ""
+            Using dataAdapter = New SqlDataAdapter("SELECT last_line FROM " + FileTable + " WHERE fileName='" + logfile + "'", SQLConnection)
                 ' you dont need to open/close the connection with a DataAdapter '
                 dataAdapter.Fill(dataTable)
             End Using
-            If dataTable.Rows.Count = 0 Then
-                ' new file
-                sqlCommand = New SqlCommand("Insert into " + FileTable + " (filename,last_edit) values('" + logfile + "', '" + last_edit + "')", SQLConnection)
-                RecordsAffected = sqlCommand.ExecuteNonQuery()
-
-            Else
-                current_last_edit = dataTable.Rows(0).Item(0).ToString
-                If current_last_edit = last_edit Then
-                    Continue For
-                Else
-                    ' existing file
-                    sqlCommand = New SqlCommand("UPDATE " + FileTable + " Set last_edit='" + last_edit + "' WHERE fileName='" + logfile + "'", SQLConnection)
-                    RecordsAffected = sqlCommand.ExecuteNonQuery()
-
-                End If
+            Dim is_new_file = True
+            If dataTable.Rows.Count > 0 Then
+                current_last_line = dataTable.Rows(0).Item(0).ToString
+                is_new_file = False
             End If
 
             dataTable.Clear()
@@ -83,81 +70,83 @@ Module Application
             'we can place all old logs in their new location and not have to worry about false positives in the database for a full reread
             'Now we are ready to scrape the log
             logData = New StreamReader(logfile, FileMode.Open)
-
+            Dim CurrentLine = ""
             While (logData.Peek <> -1)
                 Try
                     CIDExists = False
                     MIDExists = False
+                    Dim PageID As String = ""
                     CurrentLine = logData.ReadLine()
+                    If current_last_line <> "" Then
+                        If CurrentLine = current_last_line Then
+                            current_last_line = ""
+                        End If
+                        Continue While
+                    End If
                     'the logs are space delimited so we have to split each individual line on spaces
-                    currentRow = CurrentLine.Split(New Char() {" "c})
+                    Dim currentRow = CurrentLine.Split(New Char() {" "c})
                     'we need to ensure that each line has at least 12 partitions or it will not have the information we need
                     '  to determine if it should go into the database for the next step
-                    If currentRow.Length > 11 Then
+                    If currentRow.Length = 22 Then
                         'the bot pattern contains a list of words that you find in queries that are just trawling the website and
                         '    have a negative impact on our results
-                        If Regex.IsMatch(currentRow(12), Botpattern, RegexOptions.IgnoreCase) Then
+                        If Botpattern.IsMatch(currentRow(12)) Then
                             Continue While
                         End If
                         'checking for a cid
-                        If Regex.IsMatch(currentRow(7), CIdPattern) Then
-                            IDmatch = Regex.Matches(currentRow(7), CIdPattern)
-                            CIDExists = True
-                            If IDmatch.Item(0).ToString = "cid=" Then
-                                CIDExists = False
+                        Dim PM As Match = pagePattern.Match(currentRow(6))
+                        If PM.Success Then
+                            Dim CorM As String
+                            If PM.Groups(1).Value.ToUpper() = "CONSTRUCT" Then
+                                CIDExists = True
+                                IDmatch = CIdPattern.Match(currentRow(7))
+                                CorM = "c"
                             End If
-                            itemID = IDmatch.Item(0).ToString
-                        End If
-                        'checking for a mid'
-                        If Regex.IsMatch(currentRow(7), MIdPattern) Then
-                            IDmatch = Regex.Matches(currentRow(7), MIdPattern)
-                            MIDExists = True
-                            If IDmatch.Item(0).ToString = "mid=" Then
-                                MIDExists = False
+                            If PM.Groups(1).Value.ToUpper() = "MEASURE" Then
+                                MIDExists = True
+                                IDmatch = MIdPattern.Match(currentRow(7))
+                                CorM = "m"
                             End If
-                            itemID = IDmatch.Item(0).ToString
-                        End If
-                        If Not CIDExists And Not MIDExists Then
-                            Continue While
-                        End If
-                        Access_date = currentRow(0)
-                        time = currentRow(1)
-                        visitorIP = currentRow(10)
-                        Access_time = Convert.ToDateTime(Access_date + " " + time)
-                        If Access_time < current_last_edit Then
-                            Continue While
-                        End If
-                    Else
-                        Continue While
-                    End If
-                    'once we have pulled all th information we need from the logfile and we have tedermined it is one we want to youse we insert it into the database
-                    Dim parts As String() = itemID.Split((New Char() {"="}))
-                    Dim CorM As Char
-                    If CIDExists Then
-                        CorM = "c"
-                    ElseIf MIDExists Then
-                        CorM = "m"
-                    End If
-                    If CorM = "c" Or CorM = "m" Then
-                        sqlCommand = New SqlCommand("INSERT INTO " + LogStorageTable + "([dateTimeAccessed],[IpAddress],[itemTYPE],[itemID]) Values('" + Access_time + "','" + visitorIP + "', '" + CorM + "','" + parts(1) + "') ", SQLConnection)
-                        sqlCommand.ExecuteNonQuery()
-                    End If
+                            If IDmatch.Success Then
+                                PageID = IDmatch.Groups(2).Value
+                                Access_date = currentRow(0)
+                                time = currentRow(1)
+                                visitorIP = currentRow(10)
+                                Access_time = Convert.ToDateTime(Access_date + " " + time)
 
+                                'once we have pulled all th information we need from the logfile and we have tedermined it is one we want to youse we insert it into the database
+
+                                sqlCommand = New SqlCommand("INSERT INTO " + LogStorageTable + "([dateTimeAccessed],[IpAddress],[itemTYPE],[itemID]) Values('" + Access_time + "','" + visitorIP + "', '" + CorM + "','" + PageID + "') ", SQLConnection)
+                                sqlCommand.ExecuteNonQuery()
+
+                            End If
+                        End If
+                    End If
                 Catch ex As Microsoft.VisualBasic.FileIO.MalformedLineException
                     Console.WriteLine("Line " & ex.Message & "is not valid and will be skipped.")
                 End Try
             End While
+
+            If is_new_file Then
+                ' new file
+                sqlCommand = New SqlCommand("Insert into " + FileTable + " (filename,last_line) values('" + logfile + "', '" + CurrentLine + "')", SQLConnection)
+                RecordsAffected = sqlCommand.ExecuteNonQuery()
+
+            Else
+                sqlCommand = New SqlCommand("UPDATE " + FileTable + " Set last_line='" + CurrentLine + "' WHERE fileName='" + logfile + "'", SQLConnection)
+                RecordsAffected = sqlCommand.ExecuteNonQuery()
+            End If
         Next
     End Sub
     Function Entropy(ByRef Numbers As Array) As Double
-        Dim Sum = 0
+        Dim Sum As Double = 0
         For i = 0 To Numbers.Length - 1
             Sum = Numbers(i) + Sum
         Next
         Dim result = 0
         For i = 0 To Numbers.Length - 1
             Dim X As Integer = Numbers(i)
-            If X <= 1 Then Continue For
+            If X <= 0 Then Continue For
             result = result + X * Math.Log(X)
         Next
         Return Sum * Math.Log(Sum) - result
@@ -180,8 +169,8 @@ Module Application
         Dim row As DataRow
         Dim IpToGroup As New Dictionary(Of String, Integer)
         Dim GroupToTime As New Dictionary(Of String, DateTime)
-        Dim GroupToVisited As New Dictionary(Of Integer, LinkedList(Of Integer))
-        Dim CIDGroupToVisitCount As New Dictionary(Of Integer, Integer)
+        Dim GroupToVisited As New Dictionary(Of Integer, HashSet(Of Integer))
+        Dim GroupVisitCount As New Dictionary(Of Integer, Integer)
         Dim CIDToCount As New Dictionary(Of Integer, Integer)
         Dim CIDGroup_count As Integer = 0
         Dim InfoTable = New DataTable
@@ -191,14 +180,12 @@ Module Application
         Dim columnEntropy As Double
         Dim rowEntropy As Double
         Dim totalEntropy As Double
-        Dim LRR As Double
         Dim resultsCount As Integer = 0
-        Dim Count1, Count2 As Integer
 
         CIDGroup_count = 0
 
         '##########LOG TABLE CALL##############################
-        Using da = New SqlDataAdapter("SELECT dateTimeAccessed, IpAddress, itemID FROM " & LogStorageTable & " where itemTYPE = '" & Model(0) & "' and dateTimeAccessed > '" & DateAdd(DateInterval.Month, -months_to_look_back, DateTime.Now) & "'", SQLConnection)
+        Using da = New SqlDataAdapter("SELECT dateTimeAccessed, IpAddress, itemID FROM " & LogStorageTable & " where itemTYPE = '" & Model(0) & "' and dateTimeAccessed > '" & DateAdd(DateInterval.Month, -months_to_look_back, DateTime.Now) & "' order by dateTimeAccessed asc", SQLConnection)
             da.Fill(InfoTable)
         End Using
 
@@ -210,30 +197,30 @@ Module Application
             Dim _IpToGroup As Integer = -1
             If IpToGroup.ContainsKey(_IpAddress) Then
                 _IpToGroup = IpToGroup.Item(_IpAddress)
-                within_timeframe = DateDiff(DateInterval.Day, GroupToTime.Item(_IpToGroup), row.Item("dateTimeAccessed")) <= 10080
+                within_timeframe = DateDiff(DateInterval.Minute, GroupToTime.Item(_IpToGroup), row.Item("dateTimeAccessed")) <= 10080
             End If
             'this checks if the IpAddress has already been assigned to a group Id
             If _IpToGroup <> -1 Then
                 'if exists check time to see if it is in the window to be a new group or appended to the current one
                 If within_timeframe Then
                     GroupToTime.Item(_IpToGroup) = row.Item("dateTimeAccessed")
-                    CIDGroupToVisitCount.Item(_IpToGroup) += 1
-                    GroupToVisited.Item(_IpToGroup).AddLast(_item)
+                    GroupVisitCount.Item(_IpToGroup) += 1
+                    GroupToVisited.Item(_IpToGroup).Add(_item)
                 Else
                     'Map this visit to a new group if it is outside the time window
                     _IpToGroup = IpToGroup.Item(_IpAddress) = CIDGroup_count
-                    GroupToVisited.Add(CIDGroup_count, New LinkedList(Of Integer))
-                    GroupToVisited(CIDGroup_count).AddLast(_item)
-                    CIDGroupToVisitCount.Add(CIDGroup_count, 1)
+                    GroupToVisited.Add(CIDGroup_count, New HashSet(Of Integer))
+                    GroupToVisited(CIDGroup_count).Add(_item)
+                    GroupVisitCount.Add(CIDGroup_count, 1)
                     GroupToTime.Add(CIDGroup_count, row.Item("dateTimeAccessed"))
                     CIDGroup_count += 1
                 End If
             Else
                 'make new group as necessary
                 IpToGroup.Add(_IpAddress, CIDGroup_count)
-                GroupToVisited.Add(CIDGroup_count, New LinkedList(Of Integer))
-                GroupToVisited(CIDGroup_count).AddLast(_item)
-                CIDGroupToVisitCount.Add(CIDGroup_count, 1)
+                GroupToVisited.Add(CIDGroup_count, New HashSet(Of Integer))
+                GroupToVisited(CIDGroup_count).Add(_item)
+                GroupVisitCount.Add(CIDGroup_count, 1)
                 GroupToTime.Add(CIDGroup_count, row.Item("dateTimeAccessed"))
                 CIDGroup_count += 1
             End If
@@ -245,13 +232,11 @@ Module Application
         GroupToTime.Clear()
         IpToGroup.Clear()
         InfoTable.Clear()
-        Dim removableKeys = (From pair In CIDGroupToVisitCount Where pair.Value < 5 Select pair.Key).ToArray
+        Dim removableKeys = (From pair In GroupVisitCount Where pair.Value < 5 Select pair.Key).ToArray
         For Each key In removableKeys
-            CIDGroupToVisitCount.Remove(key)
+            GroupVisitCount.Remove(key)
             GroupToVisited.Remove(key)
-            CIDGroup_count -= 1
         Next
-        CIDGroup_count += CIDGroupToVisitCount.Count
         Dim ResultsArray(CIDToCount.Count()) As Tuple(Of Double, Integer, Boolean)
         Dim PoolIDs As New Dictionary(Of Integer, Integer)
         For Each key2 In CIDToCount.Keys.ToList
@@ -266,7 +251,6 @@ Module Application
             End If
         Next
         InfoTable.Clear()
-        'SZ TODO: Make this section a little more functionally borken up to make it easier to repeat for MIDs
         For Each key1 In CIDToCount.Keys()
             resultsCount = 0
             Dim PoolID = -1
@@ -277,28 +261,23 @@ Module Application
                 'get values for algorythm
                 If key1 <> key2 Then
                     Dim Overlap_Count = GroupToVisited.Where(Function(obj) obj.Value.Contains(key1) And obj.Value.Contains(key2)).Count
-                    If Overlap_Count = 0 Then
-                        Continue For
-                    End If
-                    Dim FirstKeyOnly = CIDToCount.Item(key1) - Overlap_Count
-                    Dim SecondKeyOnly = CIDToCount.Item(key2) - Overlap_Count
-                    Dim NeitherKey = CIDGroup_count - Count1 - Count2 + Overlap_Count
+                    Dim FirstKeyOnly = GroupToVisited.Where(Function(obj) obj.Value.Contains(key1) And Not obj.Value.Contains(key2)).Count
+                    Dim SecondKeyOnly = GroupToVisited.Where(Function(obj) Not obj.Value.Contains(key1) And obj.Value.Contains(key2)).Count
+                    Dim NeitherKey = GroupToVisited.Where(Function(obj) Not obj.Value.Contains(key1) And Not obj.Value.Contains(key2)).Count
 
-                    rowEntropy = Entropy({Overlap_Count, SecondKeyOnly}) + Entropy({FirstKeyOnly, NeitherKey})
-                    columnEntropy = Entropy({Overlap_Count, FirstKeyOnly}) + Entropy({SecondKeyOnly, NeitherKey})
+                    rowEntropy = Entropy({Overlap_Count + SecondKeyOnly, FirstKeyOnly + NeitherKey})
+                    columnEntropy = Entropy({Overlap_Count + FirstKeyOnly, SecondKeyOnly + NeitherKey})
                     totalEntropy = Entropy({FirstKeyOnly, SecondKeyOnly, Overlap_Count, NeitherKey})
                     If rowEntropy + columnEntropy > totalEntropy Then
-                        LRR = 0
-                    Else
-                        LRR = 2 * (totalEntropy - rowEntropy - columnEntropy)
+                        Dim LRR As Double = 2 * (rowEntropy + columnEntropy - totalEntropy)
+                        Dim _PoolID = -1
+                        If PoolIDs.ContainsKey(key2) Then
+                            _PoolID = PoolIDs(key2)
+                        End If
+                        Dim Scaled_LRR = 1 - 1 / (1 + LRR)
+                        ResultsArray(resultsCount) = Tuple.Create(Scaled_LRR, key2, PoolID = _PoolID)
+                        resultsCount += 1
                     End If
-                    Dim _PoolID = -1
-                    If PoolIDs.ContainsKey(key2) Then
-                        _PoolID = PoolIDs(key2)
-                    End If
-                    Dim Scaled_LRR = LRR / (1 + LRR)
-                    ResultsArray(resultsCount) = Tuple.Create(Scaled_LRR, key2, PoolID = _PoolID)
-                    resultsCount += 1
                 End If
             Next
             Array.Sort(ResultsArray)
@@ -310,7 +289,7 @@ Module Application
             sqlCommand.ExecuteNonQuery()
             Dim sCounter = 1
             Dim rCounter = 1
-            For counter As Integer = 0 To 99
+            For counter As Integer = 0 To ResultsArray.Length - 1
                 If IsNothing(ResultsArray(counter)) Then
                 ElseIf ResultsArray(counter).Item1 <> -1 Then
                     Dim relationship
