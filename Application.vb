@@ -109,6 +109,7 @@ Module Application
                             End If
                             If IDmatch.Success Then
                                 PageID = IDmatch.Groups(2).Value
+                                If PageID <> "" Then
                                 Access_date = currentRow(0)
                                 time = currentRow(1)
                                 visitorIP = currentRow(10)
@@ -118,7 +119,7 @@ Module Application
 
                                 sqlCommand = New SqlCommand("INSERT INTO " + LogStorageTable + "([dateTimeAccessed],[IpAddress],[itemTYPE],[itemID]) Values('" + Access_time + "','" + visitorIP + "', '" + CorM + "','" + PageID + "') ", SQLConnection)
                                 sqlCommand.ExecuteNonQuery()
-
+                                End If
                             End If
                         End If
                     End If
