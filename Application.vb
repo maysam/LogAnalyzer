@@ -38,7 +38,6 @@ Module Application
         Dim MIdPattern As Regex = New Regex("(mid=)(\d*)", RegexOptions.IgnoreCase)
         Dim Access_date, time, visitorIP As String
         Dim itemID = vbNullString
-        Dim IDmatch As Match
         Dim Access_time As DateTime
         Dim CIDExists, MIDExists As Boolean
         Dim RecordsAffected As Integer
@@ -96,7 +95,8 @@ Module Application
                         'checking for a cid
                         Dim PM As Match = pagePattern.Match(currentRow(6))
                         If PM.Success Then
-                            Dim CorM As String
+                            Dim CorM As String = "x"
+                            Dim IDmatch As Match = Nothing
                             If PM.Groups(1).Value.ToUpper() = "CONSTRUCT" Then
                                 CIDExists = True
                                 IDmatch = CIdPattern.Match(currentRow(7))
@@ -209,8 +209,7 @@ Module Application
                 Else
                     'Map this visit to a new group if it is outside the time window
                     _IpToGroup = IpToGroup.Item(_IpAddress) = CIDGroup_count
-                    GroupToVisited.Add(CIDGroup_count, New HashSet(Of Integer))
-                    GroupToVisited(CIDGroup_count).Add(_item)
+                    GroupToVisited.Add(CIDGroup_count, New HashSet(Of Integer)({_item}))
                     GroupVisitCount.Add(CIDGroup_count, 1)
                     GroupToTime.Add(CIDGroup_count, row.Item("dateTimeAccessed"))
                     CIDGroup_count += 1
@@ -218,30 +217,42 @@ Module Application
             Else
                 'make new group as necessary
                 IpToGroup.Add(_IpAddress, CIDGroup_count)
-                GroupToVisited.Add(CIDGroup_count, New HashSet(Of Integer))
-                GroupToVisited(CIDGroup_count).Add(_item)
+                GroupToVisited.Add(CIDGroup_count, New HashSet(Of Integer)({_item}))
                 GroupVisitCount.Add(CIDGroup_count, 1)
                 GroupToTime.Add(CIDGroup_count, row.Item("dateTimeAccessed"))
                 CIDGroup_count += 1
-            End If
-            If Not CIDToCount.ContainsKey(_item) Then
-                CIDToCount.Add(_item, 0)
             End If
         Next
         'freeing up no longer needed memory
         GroupToTime.Clear()
         IpToGroup.Clear()
         InfoTable.Clear()
+        Dim SessionTable = "rSessions"
+        sqlCommand = New SqlCommand("Delete From " & SessionTable, SQLConnection)
+        sqlCommand.ExecuteNonQuery()
+        For Each key As Integer In GroupToVisited.Keys
+            sqlCommand = New SqlCommand("insert into " & SessionTable & " values ( " & key & ", " & GroupToVisited(key).Count & ",'" & String.Join(",", GroupToVisited(key)) & "')", SQLConnection)
+            sqlCommand.ExecuteNonQuery()
+        Next
+
+
         Dim removableKeys = (From pair In GroupVisitCount Where pair.Value < 5 Select pair.Key).ToArray
         For Each key In removableKeys
             GroupVisitCount.Remove(key)
             GroupToVisited.Remove(key)
         Next
-        Dim ResultsArray(CIDToCount.Count()) As Tuple(Of Double, Integer, Boolean)
         Dim PoolIDs As New Dictionary(Of Integer, Integer)
-        For Each key2 In CIDToCount.Keys.ToList
-            CIDToCount.Item(key2) += GroupToVisited.Where(Function(obj) obj.Value.Contains(key2)).Count
+        For Each key In GroupToVisited.Keys
+            Dim items = GroupToVisited(key)
+            For Each value In items
+                If CIDToCount.ContainsKey(value) Then
+                    CIDToCount.Item(value) += 1
+                Else
+                    CIDToCount.Add(value, 1)
+                End If
+            Next
         Next
+        Dim ResultsArray(CIDToCount.Count()) As Tuple(Of Double, Integer, Boolean)
         Using da = New SqlDataAdapter("SELECT " & Model & "Id as ObjID, PoolId FROM t" & Model & " left join rcategories cat on constructid = cat.variableid", SQLConnection)
             da.Fill(InfoTable)
         End Using
