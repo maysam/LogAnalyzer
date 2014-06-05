@@ -144,13 +144,13 @@ Module Application
         For i = 0 To Numbers.Length - 1
             Sum = Numbers(i) + Sum
         Next
-        Dim result = 0
+        Dim result As Double = 0
         For i = 0 To Numbers.Length - 1
-            Dim X As Integer = Numbers(i)
+            Dim X As Double = Numbers(i)
             If X <= 0 Then Continue For
-            result = result + X * Math.Log(X)
+            result = result + X * Math.Log(X, 2)
         Next
-        Return Sum * Math.Log(Sum) - result
+        Return Sum * Math.Log(Sum, 2) - result
     End Function
 
     Sub process(ByVal Model As String)
