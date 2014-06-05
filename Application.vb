@@ -170,13 +170,11 @@ Module Application
         Dim row As DataRow
         Dim IPSession As New Dictionary(Of String, Integer)
         Dim SessionTime As New Dictionary(Of String, DateTime)
-        Dim Session As New Dictionary(Of Integer, List(Of Integer))
-        Dim SessionCount As New Dictionary(Of Integer, Integer)
+        Dim Session As New Dictionary(Of Integer, HashSet(Of Integer))
         Dim ItemCount As New Dictionary(Of Integer, Integer)
         Dim IndexCounter As Integer = 0
         Dim InfoTable = New DataTable
         Dim sqlCommand As New SqlCommand
-        Dim closestMatches As New LinkedList(Of Tuple)
         Dim results = Tuple.Create(0.0, "Null")
         Dim columnEntropy As Double
         Dim rowEntropy As Double
@@ -197,21 +195,18 @@ Module Application
                 'if exists check time to see if it is in the window to be a new group or appended to the current one
                 If DateDiff(DateInterval.Minute, SessionTime.Item(index), row.Item("dateTimeAccessed")) <= 10080 Then
                     SessionTime.Item(index) = row.Item("dateTimeAccessed")
-                    SessionCount.Item(index) += 1
                     Session.Item(index).Add(itemID)
                 Else
                     'Map this visit to a new group if it is outside the time window
-                    index = IPSession.Item(_IpAddress) = IndexCounter
-                    Session.Add(IndexCounter, New List(Of Integer)({itemID}))
-                    SessionCount.Add(IndexCounter, 1)
+                    IPSession.Item(_IpAddress) = IndexCounter
+                    Session.Add(IndexCounter, New HashSet(Of Integer)({itemID}))
                     SessionTime.Add(IndexCounter, row.Item("dateTimeAccessed"))
                     IndexCounter += 1
                 End If
             Else
                 'make new group as necessary
                 IPSession.Add(_IpAddress, IndexCounter)
-                Session.Add(IndexCounter, New List(Of Integer)({itemID}))
-                SessionCount.Add(IndexCounter, 1)
+                Session.Add(IndexCounter, New HashSet(Of Integer)({itemID}))
                 SessionTime.Add(IndexCounter, row.Item("dateTimeAccessed"))
                 IndexCounter += 1
             End If
@@ -223,7 +218,6 @@ Module Application
 
         Dim removableKeys = (From pair In Session Where pair.Value.Count < 5 Select pair.Key).ToArray
         For Each key In removableKeys
-            SessionCount.Remove(key)
             Session.Remove(key)
         Next
 
