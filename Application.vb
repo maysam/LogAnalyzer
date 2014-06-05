@@ -216,7 +216,7 @@ Module Application
         IPSession.Clear()
         InfoTable.Clear()
 
-        Dim removableKeys = (From pair In Session Where pair.Value.Count < 5 Select pair.Key).ToArray
+        Dim removableKeys = (From pair In Session Where pair.Value.Count < 6 Select pair.Key).ToArray
         For Each key In removableKeys
             Session.Remove(key)
         Next
