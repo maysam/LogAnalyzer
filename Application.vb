@@ -258,27 +258,25 @@ Module Application
             If PoolIDs.ContainsKey(key1) Then
                 PoolID = PoolIDs(key1)
             End If
-            For Each key2 In ItemCount.Keys()
-                'get values for algorythm
-                If key1 <> key2 Then
-                    Dim Overlap_Count = Session.Where(Function(obj) obj.Value.Contains(key1) And obj.Value.Contains(key2)).Count
-                    Dim FirstKeyOnly = Session.Where(Function(obj) obj.Value.Contains(key1) And Not obj.Value.Contains(key2)).Count
-                    Dim SecondKeyOnly = Session.Where(Function(obj) Not obj.Value.Contains(key1) And obj.Value.Contains(key2)).Count
-                    Dim NeitherKey = Session.Where(Function(obj) Not obj.Value.Contains(key1) And Not obj.Value.Contains(key2)).Count
-
-                    rowEntropy = Entropy({Overlap_Count + SecondKeyOnly, FirstKeyOnly + NeitherKey})
-                    columnEntropy = Entropy({Overlap_Count + FirstKeyOnly, SecondKeyOnly + NeitherKey})
-                    totalEntropy = Entropy({FirstKeyOnly, SecondKeyOnly, Overlap_Count, NeitherKey})
-                    If rowEntropy + columnEntropy > totalEntropy Then
-                        Dim LRR As Double = 2 * (rowEntropy + columnEntropy - totalEntropy)
-                        Dim _PoolID = -1
-                        If PoolIDs.ContainsKey(key2) Then
-                            _PoolID = PoolIDs(key2)
-                        End If
-                        Dim Scaled_LRR = 1 - 1 / (1 + LRR)
-                        ResultsArray(resultsCount) = Tuple.Create(Scaled_LRR, key2, PoolID = _PoolID)
-                        resultsCount += 1
+            For Each key2 In ItemCount.Keys().Where(Function(obj) Not obj.Equals(key1))
+                Dim Overlap_Count = Session.Where(Function(obj) obj.Value.Contains(key1) And obj.Value.Contains(key2)).Count
+                Dim FirstKeyOnly = Session.Where(Function(obj) obj.Value.Contains(key1) And (Not obj.Value.Contains(key2))).Count
+                Dim SecondKeyOnly = Session.Where(Function(obj) (Not obj.Value.Contains(key1)) And obj.Value.Contains(key2)).Count
+                Dim NeitherKey = Session.Where(Function(obj) Not (obj.Value.Contains(key1) Or obj.Value.Contains(key2))).Count
+                ' James version
+                NeitherKey = ItemCount.Count - Overlap_Count - FirstKeyOnly - SecondKeyOnly
+                rowEntropy = Entropy({Overlap_Count + SecondKeyOnly, FirstKeyOnly + NeitherKey})
+                columnEntropy = Entropy({Overlap_Count + FirstKeyOnly, SecondKeyOnly + NeitherKey})
+                totalEntropy = Entropy({FirstKeyOnly, SecondKeyOnly, Overlap_Count, NeitherKey})
+                If rowEntropy + columnEntropy > totalEntropy Then
+                    Dim LRR As Double = 2 * (rowEntropy + columnEntropy - totalEntropy)
+                    Dim _PoolID = -1
+                    If PoolIDs.ContainsKey(key2) Then
+                        _PoolID = PoolIDs(key2)
                     End If
+                    Dim Scaled_LRR = 1 - 1 / (1 + LRR)
+                    ResultsArray(resultsCount) = Tuple.Create(Scaled_LRR, key2, PoolID = _PoolID)
+                    resultsCount += 1
                 End If
             Next
             Array.Sort(ResultsArray)
