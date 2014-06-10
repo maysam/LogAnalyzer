@@ -153,6 +153,16 @@ Module Application
         Return Sum * Math.Log(Sum, 2) - result
     End Function
 
+    Function ScaledLLR(Overlap_Count As Integer, FirstKeyOnly As Integer, SecondKeyOnly As Integer, NeitherKey As Integer) As Double
+        If Overlap_Count <= 0 Then Return 0
+        Dim rowEntropy = Entropy({Overlap_Count + SecondKeyOnly, FirstKeyOnly + NeitherKey})
+        Dim columnEntropy = Entropy({Overlap_Count + FirstKeyOnly, SecondKeyOnly + NeitherKey})
+        Dim totalEntropy = Entropy({FirstKeyOnly, SecondKeyOnly, Overlap_Count, NeitherKey})
+        Dim LLR As Double = 2 * (rowEntropy + columnEntropy - totalEntropy)
+        If LLR <= 0 Then Return 0
+        Dim Scaled_LRR = 1 - 1 / (1 + LLR)
+        Return Scaled_LRR
+    End Function
     Sub process(ByVal Model As String)
         '#########################SET UP VARIBLES###############################
         'like in the log digester step your this database connection string will be differnt for you
@@ -249,34 +259,26 @@ Module Application
             End If
         Next
         InfoTable.Clear()
-        For key1 = 1 To 1
-            'For Each key1 In ItemCount.Keys()
+        For Each key1 In ItemCount.Keys()
             Dim PoolID = -1
             If PoolIDs.ContainsKey(key1) Then
                 PoolID = PoolIDs(key1)
             End If
             For Each key2 In ItemCount.Keys().Where(Function(obj) Not obj.Equals(key1))
-                Dim Overlap_Count = Session.Where(Function(obj) obj.Value.Contains(key1) And obj.Value.Contains(key2)).Count
-                If Overlap_Count = 0 Then Continue For
-                Dim FirstKeyOnly = Session.Where(Function(obj) obj.Value.Contains(key1) And (Not obj.Value.Contains(key2))).Count
-                Dim SecondKeyOnly = Session.Where(Function(obj) (Not obj.Value.Contains(key1)) And obj.Value.Contains(key2)).Count
-                Dim NeitherKey = Session.Where(Function(obj) Not (obj.Value.Contains(key1) Or obj.Value.Contains(key2))).Count
-                Dim rowEntropy = Entropy({Overlap_Count + SecondKeyOnly, FirstKeyOnly + NeitherKey})
-                Dim columnEntropy = Entropy({Overlap_Count + FirstKeyOnly, SecondKeyOnly + NeitherKey})
-                Dim totalEntropy = Entropy({FirstKeyOnly, SecondKeyOnly, Overlap_Count, NeitherKey})
-                If rowEntropy + columnEntropy > totalEntropy Then
-                    Dim LRR As Double = 2 * (rowEntropy + columnEntropy - totalEntropy)
                     Dim _PoolID = -1
                     If PoolIDs.ContainsKey(key2) Then
                         _PoolID = PoolIDs(key2)
                     End If
-                    Dim Scaled_LRR = 1 - 1 / (1 + LRR)
+                Dim Overlap_Count = Session.Where(Function(obj) obj.Value.Contains(key1) And obj.Value.Contains(key2)).Count
+                Dim FirstKeyOnly = Session.Where(Function(obj) obj.Value.Contains(key1) And (Not obj.Value.Contains(key2))).Count
+                Dim SecondKeyOnly = Session.Where(Function(obj) (Not obj.Value.Contains(key1)) And obj.Value.Contains(key2)).Count
+                Dim NeitherKey = Session.Where(Function(obj) Not (obj.Value.Contains(key1) Or obj.Value.Contains(key2))).Count
+                Dim Scaled_LRR = ScaledLLR(Overlap_Count, FirstKeyOnly, SecondKeyOnly, NeitherKey)
                     If PoolID = _PoolID Then
                         sResultsArray.Add(Tuple.Create(Scaled_LRR, key2))
                     Else
                         rResultsArray.Add(Tuple.Create(Scaled_LRR, key2))
                     End If
-                End If
             Next
             rResultsArray.Sort()
             rResultsArray.Reverse()
@@ -290,12 +292,12 @@ Module Application
             sqlCommand.ExecuteNonQuery()
             For counter = 0 To sResultsArray.Count - 1
                 If counter >= 10 Then Exit For
-                sqlCommand = New SqlCommand("insert into " & StorageTable & "(FocalKey, RelationshipType, RecommendationNo, RelatedId, Score) values(" & key1 & ", 's', " & counter & ", " & sResultsArray(counter).Item2 & ", " & sResultsArray(counter).Item1 & ")", SQLConnection)
+                sqlCommand = New SqlCommand("insert into " & StorageTable & "(FocalKey, RelationshipType, RecommendationNo, RelatedId, Score) values(" & key1 & ", 's', " & (1 + counter) & ", " & sResultsArray(counter).Item2 & ", " & sResultsArray(counter).Item1 & ")", SQLConnection)
                 sqlCommand.ExecuteNonQuery()
             Next
             For counter = 0 To rResultsArray.Count - 1
                 If counter >= 10 Then Exit For
-                sqlCommand = New SqlCommand("insert into " & StorageTable & "(FocalKey, RelationshipType, RecommendationNo, RelatedId, Score) values(" & key1 & ", 'r', " & counter & ", " & rResultsArray(counter).Item2 & ", " & rResultsArray(counter).Item1 & ")", SQLConnection)
+                sqlCommand = New SqlCommand("insert into " & StorageTable & "(FocalKey, RelationshipType, RecommendationNo, RelatedId, Score) values(" & key1 & ", 'r', " & (1 + counter) & ", " & rResultsArray(counter).Item2 & ", " & rResultsArray(counter).Item1 & ")", SQLConnection)
                     sqlCommand.ExecuteNonQuery()
             Next
         Next
