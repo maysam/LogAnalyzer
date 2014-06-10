@@ -181,7 +181,7 @@ Module Application
         Dim IPSession As New Dictionary(Of String, Integer)
         Dim SessionTime As New Dictionary(Of String, DateTime)
         Dim Session As New Dictionary(Of Integer, HashSet(Of Integer))
-        Dim ItemCount As New Dictionary(Of Integer, Integer)
+        Dim Items As New SortedSet(Of Integer)
         Dim IndexCounter As Integer = 0
         Dim InfoTable = New DataTable
         Dim sqlCommand As New SqlCommand
@@ -220,7 +220,6 @@ Module Application
         'freeing up no longer needed memory
         SessionTime.Clear()
         IPSession.Clear()
-        InfoTable.Clear()
 
         Dim removableKeys = (From pair In Session Where pair.Value.Count < 6 Select pair.Key).ToArray
         For Each key In removableKeys
@@ -238,18 +237,11 @@ Module Application
         Next
 
         Dim PoolIDs As New Dictionary(Of Integer, Integer)
-        For Each key In Session.Keys
-            Dim items = Session(key)
-            For Each value In items
-                If ItemCount.ContainsKey(value) Then
-                    ItemCount.Item(value) += 1
-                Else
-                    ItemCount.Add(value, 1)
-                End If
+        For Each keyvalue As KeyValuePair(Of Integer, HashSet(Of Integer)) In Session
+            For Each value In keyvalue.Value
+                Items.Add(value)
             Next
         Next
-        Dim rResultsArray As List(Of Tuple(Of Double, Integer)) = New List(Of Tuple(Of Double, Integer))()
-        Dim sResultsArray As List(Of Tuple(Of Double, Integer)) = New List(Of Tuple(Of Double, Integer))()
         Using da = New SqlDataAdapter("SELECT " & Model & "Id as ObjID, PoolId FROM t" & Model & " left join rcategories cat on constructid = cat.variableid", SQLConnection)
             da.Fill(InfoTable)
         End Using
@@ -258,13 +250,16 @@ Module Application
                 PoolIDs.Add(row.Item("ObjID"), row.Item("PoolId"))
             End If
         Next
+
         InfoTable.Clear()
-        For Each key1 In ItemCount.Keys()
+        For Each key1 In Items
             Dim PoolID = -1
             If PoolIDs.ContainsKey(key1) Then
                 PoolID = PoolIDs(key1)
             End If
-            For Each key2 In ItemCount.Keys().Where(Function(obj) Not obj.Equals(key1))
+            Dim rResultsArray As New List(Of Tuple(Of Double, Integer))
+            Dim sResultsArray As New List(Of Tuple(Of Double, Integer))
+            For Each key2 In Items.Where(Function(obj) Not obj.Equals(key1))
                     Dim _PoolID = -1
                     If PoolIDs.ContainsKey(key2) Then
                         _PoolID = PoolIDs(key2)
@@ -274,11 +269,13 @@ Module Application
                 Dim SecondKeyOnly = Session.Where(Function(obj) (Not obj.Value.Contains(key1)) And obj.Value.Contains(key2)).Count
                 Dim NeitherKey = Session.Where(Function(obj) Not (obj.Value.Contains(key1) Or obj.Value.Contains(key2))).Count
                 Dim Scaled_LRR = ScaledLLR(Overlap_Count, FirstKeyOnly, SecondKeyOnly, NeitherKey)
+                If Scaled_LRR > 0 Then
                     If PoolID = _PoolID Then
                         sResultsArray.Add(Tuple.Create(Scaled_LRR, key2))
                     Else
                         rResultsArray.Add(Tuple.Create(Scaled_LRR, key2))
                     End If
+                End If
             Next
             rResultsArray.Sort()
             rResultsArray.Reverse()
