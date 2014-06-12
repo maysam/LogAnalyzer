@@ -260,10 +260,10 @@ Module Application
             Dim rResultsArray As New List(Of Tuple(Of Double, Integer))
             Dim sResultsArray As New List(Of Tuple(Of Double, Integer))
             For Each key2 In Items.Where(Function(obj) Not obj.Equals(key1))
-                    Dim _PoolID = -1
-                    If PoolIDs.ContainsKey(key2) Then
-                        _PoolID = PoolIDs(key2)
-                    End If
+                Dim _PoolID = -1
+                If PoolIDs.ContainsKey(key2) Then
+                    _PoolID = PoolIDs(key2)
+                End If
                 Dim Overlap_Count = Session.Where(Function(obj) obj.Value.Contains(key1) And obj.Value.Contains(key2)).Count
                 Dim FirstKeyOnly = Session.Where(Function(obj) obj.Value.Contains(key1) And (Not obj.Value.Contains(key2))).Count
                 Dim SecondKeyOnly = Session.Where(Function(obj) (Not obj.Value.Contains(key1)) And obj.Value.Contains(key2)).Count
@@ -295,7 +295,7 @@ Module Application
             For counter = 0 To rResultsArray.Count - 1
                 If counter >= 10 Then Exit For
                 sqlCommand = New SqlCommand("insert into " & StorageTable & "(FocalKey, RelationshipType, RecommendationNo, RelatedId, Score) values(" & key1 & ", 'r', " & (1 + counter) & ", " & rResultsArray(counter).Item2 & ", " & rResultsArray(counter).Item1 & ")", SQLConnection)
-                    sqlCommand.ExecuteNonQuery()
+                sqlCommand.ExecuteNonQuery()
             Next
         Next
     End Sub
