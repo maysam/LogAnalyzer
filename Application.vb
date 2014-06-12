@@ -226,22 +226,13 @@ Module Application
             Session.Remove(key)
         Next
 
-        Dim SessionTable = "rSessions"
-        sqlCommand = New SqlCommand("Delete From " & SessionTable & " where model='" & Model(0) & "'", SQLConnection)
-        sqlCommand.ExecuteNonQuery()
-        For Each key As Integer In Session.Keys
-            For Each value In Session(key)
-                sqlCommand = New SqlCommand("insert into " & SessionTable & " values ( " & key + 1 & ", " & value & ", '" & Model(0) & "')", SQLConnection)
-                sqlCommand.ExecuteNonQuery()
-            Next
-        Next
-
-        Dim PoolIDs As New Dictionary(Of Integer, Integer)
         For Each keyvalue As KeyValuePair(Of Integer, HashSet(Of Integer)) In Session
             For Each value In keyvalue.Value
                 Items.Add(value)
             Next
         Next
+
+        Dim PoolIDs As New Dictionary(Of Integer, Integer)
         Using da = New SqlDataAdapter("SELECT " & Model & "Id as ObjID, PoolId FROM t" & Model & " left join rcategories cat on constructid = cat.variableid", SQLConnection)
             da.Fill(InfoTable)
         End Using
